@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- 纸白米黄底 + 麂皮驼贴袋，袋口赭石包边 -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F7F2E7"/>
+      <stop offset="1" stop-color="#EDE6D6"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="29" fill="url(#bg)"/>
+  <rect x="1.75" y="1.75" width="124.5" height="124.5" rx="27.25" fill="none" stroke="#1B1C20" stroke-opacity="0.14" stroke-width="3.5"/>
+
+  <g transform="rotate(-11 59 52)">
+    <path d="M33 21 h38 l20 20 v36 a6 6 0 0 1-6 6 H33 a6 6 0 0 1-6-6 V27 a6 6 0 0 1 6-6 Z"
+          fill="#FFFDF8" stroke="#1B1C20" stroke-opacity="0.18" stroke-width="2.5"/>
+    <path d="M71 21 v11 a9 9 0 0 0 9 9 h11 Z" fill="#DCD4C2"/>
+    <rect x="42" y="43" width="38" height="6" rx="3" fill="#1B1C20" opacity=".78"/>
+    <rect x="42" y="54" width="38" height="6" rx="3" fill="#1B1C20" opacity=".5"/>
+    <rect x="42" y="65" width="24" height="6" rx="3" fill="#1B1C20" opacity=".3"/>
+  </g>
+
+  <!-- 袋身：麂皮驼 -->
+  <path d="M25.75 71.89 L99.25 54.12 A9 9 0 0 1 108 61 L108 101
+           A9 9 0 0 1 99 110 L26 110 A9 9 0 0 1 17 101 L17 83
+           A9 9 0 0 1 25.75 71.89 Z" fill="#B58150"/>
+  <!-- 袋口包边：赭石（深） -->
+  <path d="M25.75 71.89 L99.25 54.12 A9 9 0 0 1 108 61 L108 65 L17 87 L17 83
+           A9 9 0 0 1 25.75 71.89 Z" fill="#8B4A26"/>
+</svg>

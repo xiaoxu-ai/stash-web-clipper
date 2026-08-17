@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 280" width="440" height="280">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F7F2E7"/><stop offset="1" stop-color="#E8E0CE"/>
+    </linearGradient>
+    <linearGradient id="ico" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDFAF3"/><stop offset="1" stop-color="#F2EBDB"/>
+    </linearGradient>
+  </defs>
+  <rect width="440" height="280" fill="url(#tile)"/>
+
+  <!-- 图标：P6 原图 128 见方，放大 1.32 倍放到左侧 -->
+  <g transform="translate(34 71) scale(1.32)">
+    <rect width="128" height="128" rx="29" fill="url(#ico)"/>
+    <rect x="1.75" y="1.75" width="124.5" height="124.5" rx="27.25" fill="none"
+          stroke="#1B1C20" stroke-opacity="0.16" stroke-width="3.5"/>
+    <g transform="rotate(-11 59 52)">
+      <path d="M33 21 h38 l20 20 v36 a6 6 0 0 1-6 6 H33 a6 6 0 0 1-6-6 V27 a6 6 0 0 1 6-6 Z"
+            fill="#FFFDF8" stroke="#1B1C20" stroke-opacity="0.18" stroke-width="2.5"/>
+      <path d="M71 21 v11 a9 9 0 0 0 9 9 h11 Z" fill="#DCD4C2"/>
+      <rect x="42" y="43" width="38" height="6" rx="3" fill="#1B1C20" opacity=".78"/>
+      <rect x="42" y="54" width="38" height="6" rx="3" fill="#1B1C20" opacity=".5"/>
+      <rect x="42" y="65" width="24" height="6" rx="3" fill="#1B1C20" opacity=".3"/>
+    </g>
+    <path d="M25.75 71.89 L99.25 54.12 A9 9 0 0 1 108 61 L108 101
+             A9 9 0 0 1 99 110 L26 110 A9 9 0 0 1 17 101 L17 83
+             A9 9 0 0 1 25.75 71.89 Z" fill="#B58150"/>
+    <path d="M25.75 71.89 L99.25 54.12 A9 9 0 0 1 108 61 L108 65 L17 87 L17 83
+             A9 9 0 0 1 25.75 71.89 Z" fill="#8B4A26"/>
+  </g>
+
+  <g font-family="PingFang SC, Hiragino Sans GB, Helvetica, sans-serif">
+    <text x="232" y="126" font-size="40" font-weight="600" fill="#1B1C20"
+          letter-spacing="1">文章打包</text>
+    <text x="234" y="158" font-size="21" font-weight="500" fill="#8B4A26"
+          letter-spacing="3.5">STASH</text>
+    <rect x="234" y="176" width="30" height="3" rx="1.5" fill="#B58150"/>
+    <text x="233" y="209" font-size="15.5" fill="#5A5750">剥掉广告导航，正文</text>
+    <text x="233" y="232" font-size="15.5" fill="#5A5750">连图打包带走</text>
+  </g>
+</svg>

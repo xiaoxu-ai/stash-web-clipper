@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8" /></head>
+<body>
+  <!--
+    离屏文档：一个用户看不见的扩展页面，唯一作用是提供 URL.createObjectURL。
+
+    为什么需要它：MV3 的 Service Worker 里没有 URL.createObjectURL，
+    而 chrome.downloads 用 data: URL 下载大文件会撞长度限制 ——
+    内嵌图片的 HTML 动辄好几 MB，必然超。
+    官方给的解法就是开一个离屏文档，在里面把字节转成 blob: URL 再交给下载器。
+  -->
+  <script src="offscreen.js"></script>
+</body>
+</html>

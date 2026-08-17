@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "文章打包",
+  "version": "0.7.0",
+  "description": "剥掉广告导航，把任何网页的正文连图打包下来，稍后读。输出 Markdown + 图片，或图片内嵌的单文件 HTML。X（Twitter）长文有专用优化。",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "clipboardWrite",
+    "downloads",
+    "offscreen"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "https://pbs.twimg.com/*",
+    "https://*.twimg.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "提取本页文章",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "optional_host_permissions": [
+    "<all_urls>"
+  ]
+}

@@ -1,0 +1,48 @@
+# ── macOS / 编辑器垃圾 ──
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.idea/
+.vscode/
+*.code-workspace
+
+# ── 图标构建产物 ──
+# variant-*.png 是 icons/build.sh 从 src/*.svg 生成的，随时可以重建，不进版本库。
+# 但 icon16/48/128.png 必须提交（插件运行时要用），
+# .current 也必须提交（记录当前用的是哪套方案，保证别人 clone 下来图标一致）。
+#
+# ⚠️ icons/preview.html 要靠 variant-*.png 才能显示。
+#    clone 下来先跑一次 ./icons/build.sh 把它们生成出来。
+extension/icons/variant-*.png
+
+# ── 本地调试残留 ──
+cprof*/
+*.log
+node_modules/
+
+# ── 千万别提交的东西 ──
+# 这个项目本身不读 .env，但万一将来加了，先挡住。
+.env
+.env.*
+*.key
+secrets.json
+
+# ── 注意：vendor/ 必须提交 ──
+# vendor/Readability.js（Apache-2.0）和 vendor/turndown.js（MIT）
+# 是插件运行时真正要加载的文件，不是可再生的构建产物。
+
+# ── 只留本地，不进公开仓库 ──
+# 内部文档：需求讨论、产品定位、工作日志、上架材料、开发记录
+docs/
+# 商店截图的原始素材与合成脚本（含浏览器/访达实拍）
+store-assets/raw/
+# 开发用的临时对比页，不是产品的一部分
+extension/popup-preview.html
+extension/icons/preview.html
+# 早期废弃的图标选型图
+图标三选一.png
