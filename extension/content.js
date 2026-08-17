@@ -509,7 +509,75 @@
       return true;   // 什么尺寸信息都没有 → 放行，宁可多抓不可漏
     }
 
+    // ── 表格 ──
+    //
+    // Turndown **默认不带表格规则**，每个单元格会变成一个独立的块 →
+    // 32 行 × 5 列的专辑列表被拆成 160 个碎片段落，行列对应关系全丢。
+    // （实测维基「陳昇」条目：15 张 wikitable、526 个单元格，全糊了。）
+    //
+    // 用**另一个** TurndownService 实例来转单元格内容，不复用主实例：
+    //   1. 避免在 replacement 里递归调用自己
+    //   2. 这个实例没有表格规则，所以嵌套表格会自然退化成文字，不会无限套娃
+    const tdCell = new TurndownService({
+      headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-", emDelimiter: "*",
+    });
+
+    function cellToMd(cell) {
+      let s = "";
+      try { s = tdCell.turndown(cell.innerHTML || ""); }
+      catch (e) { s = cell.textContent || ""; }
+      // 表格里的竖线必须转义，否则会把这一格劈成两格
+      s = s.replace(/\|/g, "\\|").trim();
+      // ⚠️ Markdown 表格一格只能占一行 —— 单元格里的换行/列表统一压成 <br>。
+      //    实测这页有 103 个单元格含列表或多段；压成空格会糊成一句，用 <br> 能保住结构。
+      //    .md 文件里出现少量 HTML 标签是 Markdown 的常规做法。
+      s = s.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean).join("<br>").replace(/\n+/g, "<br>");
+      return s || " ";
+    }
+
+    function tableToMd(table) {
+      // 跳过默认折叠的内容（和信息框那边保持同一个决定）
+      const t = table.cloneNode(true);
+      t.querySelectorAll(".mw-collapsed, .mw-collapsible-content").forEach((n) => n.remove());
+
+      const rows = [...t.querySelectorAll("tr")].filter((tr) => tr.children.length);
+      if (!rows.length) return "";
+
+      const grid = rows.map((tr) => [...tr.children].map(cellToMd));
+      const width = Math.max(...grid.map((r) => r.length));
+      grid.forEach((r) => { while (r.length < width) r.push(" "); });
+
+      // 有 <th> 的第一行当表头；没有就补一行空表头 —— GFM 表格语法要求必须有表头行
+      const firstIsHead = [...rows[0].children].some((c) => c.tagName === "TH");
+      const head = firstIsHead ? grid.shift() : new Array(width).fill(" ");
+      if (!grid.length) return "";
+
+      const line = (cells) => "| " + cells.join(" | ") + " |";
+      const cap = t.querySelector("caption");
+      const capMd = cap && cap.textContent.trim() ? "**" + cap.textContent.trim() + "**\n\n" : "";
+      return capMd + [line(head), "|" + " --- |".repeat(width), ...grid.map(line)].join("\n");
+    }
+
+    td.addRule("tables", {
+      filter: (node) => node.nodeName === "TABLE",
+      replacement: (content, node) => {
+        const md = tableToMd(node);
+        return md ? "\n\n" + md + "\n\n" : "";
+      },
+    });
+
     const images = [];
+    tdCell.addRule("cellImages", {
+      filter: "img",
+      replacement: function (content, node) {
+        const raw = node.getAttribute("src") || "";
+        if (!raw || raw.startsWith("data:")) return "";
+        const u = absUrl(raw);
+        if (!isContentImage(node, u)) return "";
+        if (!images.includes(u)) images.push(u);
+        return "![](" + u + ")";
+      },
+    });
     td.addRule("collectImages", {
       filter: "img",
       replacement: function (content, node) {
@@ -551,6 +619,32 @@
     //    不加这个前置否定，每张图都会被砍掉后半截，只剩一个孤零零的 "!"。
     //    （这个坑我踩过：一次改动把 28 张图全删没了。）
     body = body.replace(/(?<!!)\[\s*\]\([^)]*\)/g, "");
+
+    // ── 去掉脚注标记 ──
+    //
+    // 维基正文里密布 [\[1\]](#cite_note-1) 这种脚注角标，参考文献那节里还有
+    // [^](#cite_ref-1 "跳转") 的回跳箭头。在**离线的单文件**里它们毫无用处：
+    // 跳转目标不存在（导出的 HTML 里没有对应的 id），点了原地不动。
+    //
+    // 而且它们本来也解析不出来 —— INLINE_RE 的链接分支写死了 https?://，
+    // 匹配不上 # 开头的锚点，于是整条以**原始 Markdown 语法**露在正文里
+    // （实测陳昇那页露出 62 处）。
+    //
+    // 决定（2026-08-18）：**直接删掉**。想看出处点正文里的原文链接即可。
+    // 参考文献那一节**保留**，编号顺序和原文一致，需要查照样对得上。
+    //
+    // ⚠️ 只删 href 里含 cite/note/ref/fn 的锚点，别误伤正常的站内跳转。
+    // 标记的文字形态太多，枚举不完 —— 实测就有四种：
+    //     [\[1\]]            正文角标
+    //     [^]                回跳箭头
+    //     [**6.1**]          一源多引的回跳（加粗 + 小数点）
+    //     [跳转到： **6.0**]  带中文前缀的回跳
+    // 所以**安全阀放在 href 上**（只认 cite/note/ref/fn 锚点），文字部分放宽：
+    // 要么是 [\[数字\]] 那种带转义方括号的，要么是一段不含方括号的短文字。
+    body = body.replace(
+      /\[(?:\\\[[^\]]{0,10}\\\]|[^\[\]]{0,30})\]\(#[^)]*(?:cite|note|ref|fn)[^)]*\)/gi,
+      ""
+    );
 
     // ── 维基信息框作为附录接在文末 ──
     // 图片走和正文完全相同的过滤与收集逻辑，所以内嵌导出时会一并带上

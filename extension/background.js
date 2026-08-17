@@ -431,6 +431,40 @@ function inlineToHtml(text, imgMap, depth) {
   return out;
 }
 
+// 拆一行表格：去掉首尾竖线，按**未转义**的 | 切分，再把 \| 还原成 |
+function splitTableRow(line) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split(/(?<!\\)\|/)
+    .map((c) => c.replace(/\\\|/g, "|").trim());
+}
+
+// 单元格内容：先按 <br> 切开，每段各自走行内解析，再用真正的 <br> 接回去。
+// （不能整段丢给 inlineToHtml —— 里面的 <br> 会被 esc() 转义成可见文字。）
+function cellHtml(text, imgMap) {
+  return String(text)
+    .split(/<br\s*\/?>/i)
+    .map((part) => inlineToHtml(part, imgMap))
+    .join("<br>");
+}
+
+function tableHtml(head, body, imgMap) {
+  const width = Math.max(head.length, ...body.map((r) => r.length));
+  const pad = (r) => { const c = r.slice(); while (c.length < width) c.push(""); return c; };
+  const headHasText = head.some((c) => c.trim());
+  const thead = headHasText
+    ? "<thead><tr>" + pad(head).map((c) => `<th>${cellHtml(c, imgMap)}</th>`).join("") + "</tr></thead>"
+    : "";
+  const tbody =
+    "<tbody>" +
+    body.map((r) => "<tr>" + pad(r).map((c) => `<td>${cellHtml(c, imgMap)}</td>`).join("") + "</tr>").join("") +
+    "</tbody>";
+  // ⚠️ 外面必须套一层可横向滚动的容器：宽表格在手机上会把页面撑破
+  return `<div class="tw"><table>${thead}${tbody}</table></div>`;
+}
+
 // Markdown → HTML。只处理我们自己会产出的那几种结构，不做通用解析。
 function mdToHtml(md, imgMap) {
   const lines = String(md).split("\n");
@@ -457,6 +491,26 @@ function mdToHtml(md, imgMap) {
     }
 
     if (/^-{3,}$/.test(line.trim())) { closeList(); out.push("<hr>"); i++; continue; }
+
+    // ── 表格 ──
+    // 判据是「本行以 | 开头，且下一行是分隔行」，避免把正文里偶然出现的竖线误判成表格。
+    if (
+      line.trim().startsWith("|") &&
+      i + 1 < lines.length &&
+      /^\|[\s:|-]+\|$/.test(lines[i + 1].trim()) &&
+      lines[i + 1].includes("-")
+    ) {
+      closeList();
+      const head = splitTableRow(line);
+      i += 2;
+      const body = [];
+      while (i < lines.length && lines[i].trim().startsWith("|")) {
+        body.push(splitTableRow(lines[i]));
+        i++;
+      }
+      out.push(tableHtml(head, body, imgMap));
+      continue;
+    }
 
     if (line.startsWith("> ")) {
       closeList();
@@ -521,6 +575,18 @@ blockquote p{margin:5px 0}
 pre{margin:18px 0;padding:14px 16px;overflow-x:auto;background:var(--paper2);
  border:1px solid var(--rule);border-radius:8px;font-size:13px;line-height:1.6;
  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+/* 表格：外层 .tw 负责横向滚动 —— 宽表格在手机上会把页面撑破 */
+.tw{margin:20px 0;overflow-x:auto;-webkit-overflow-scrolling:touch;
+ border:1px solid var(--rule);border-radius:8px}
+.tw table{border-collapse:collapse;width:100%;font-size:14px;line-height:1.6}
+.tw th,.tw td{padding:8px 12px;border-bottom:1px solid var(--rule);
+ border-right:1px solid var(--rule);text-align:left;vertical-align:top;
+ white-space:normal;word-break:break-word}
+.tw th{background:var(--paper2);font-weight:650;position:sticky;top:0}
+.tw tr:last-child td{border-bottom:0}
+.tw th:last-child,.tw td:last-child{border-right:0}
+.tw tbody tr:nth-child(even){background:color-mix(in srgb,var(--paper2) 55%,transparent)}
+.tw img{max-width:160px;height:auto}
 figure{margin:22px 0}
 figure img{max-width:100%;height:auto;border-radius:10px;border:1px solid var(--rule);display:block}
 figcaption{margin-top:7px;font-size:11.5px;color:var(--soft);word-break:break-all}
