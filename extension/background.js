@@ -370,13 +370,27 @@ function esc(s) {
 // ⚠️ 而且这里**必须处理图片**：早先只认粗体和链接，结果维基文章里
 //    夹在列表项里的 16 张图（`-   ![](...)`）全被当纯文本转义了，
 //    只有独立成行的 12 张进了 HTML。
+// ⚠️ 地址部分必须写成 (?:\\.|[^\s)>])+ ，即「转义对」或「非右括号字符」。
+//
+// 原因：Turndown 会把 URL 里的字面括号转义成 \( \)，例如维基的消歧义链接
+//     [长城 (消歧义)](https://zh.wikipedia.org/wiki/%E9%95%BF%E5%9F%8E_\(%E6%B6%88%E6%AD%A7%E4%B9%89\) "长城 (消歧义)")
+// 旧写法 [^\s)>]+ 碰到 \) 里那个右括号就提前收尾，整条匹配失败 ——
+// 于是这行链接**原样以 Markdown 语法显示在正文里**（连 &quot; 都露出来）。
+// 中文维基的消歧义链接大量带括号，这个在维基条目上会频繁出现。
+//
+// 这是「链接 title 属性」那个坑的同族问题：URL 和尾部总比正则的假设更复杂。
 const INLINE_RE = new RegExp(
-  '(!\\[([^\\]]*)\\]\\(\\s*([^\\s)]+)(?:\\s+"[^"]*")?\\s*\\))' +   // 1 图片 / 2 alt / 3 地址
-  '|(\\*\\*(.+?)\\*\\*)' +                                          // 4 粗体 / 5 内容
-  '|(\\[([^\\]]*)\\]\\(\\s*<?(https?://[^\\s)>]+)>?' +              // 6 链接 / 7 文字 / 8 地址
+  '(!\\[([^\\]]*)\\]\\(\\s*((?:\\\\.|[^\\s)])+)(?:\\s+"[^"]*")?\\s*\\))' + // 1 图片 / 2 alt / 3 地址
+  '|(\\*\\*(.+?)\\*\\*)' +                                                  // 4 粗体 / 5 内容
+  '|(\\[([^\\]]*)\\]\\(\\s*<?(https?://(?:\\\\.|[^\\s)>])+)>?' +            // 6 链接 / 7 文字 / 8 地址
   '(?:\\s+"[^"]*"|\\s+\'[^\']*\')?\\s*\\))',
   'g'
 );
+
+// 把 Markdown 的转义还原成真实字符（\( → (），否则 href 里会留着反斜杠
+function unescapeMdUrl(u) {
+  return String(u || "").replace(/\\([\\()\[\]])/g, "$1");
+}
 
 // 图片渲染：抓到了就用内嵌的 data URL，没抓到退回原始地址并标注出来
 function imgTagHtml(url, imgMap, alt) {
@@ -389,21 +403,29 @@ function imgTagHtml(url, imgMap, alt) {
   );
 }
 
-function inlineToHtml(text, imgMap) {
+function inlineToHtml(text, imgMap, depth) {
+  // ⚠️ 用独立的正则实例，不要共用 INLINE_RE。
+  // 粗体分支要递归解析内容，而共用实例的 lastIndex 会被递归调用改掉，
+  // 外层循环的位置就乱了。
+  const re = new RegExp(INLINE_RE.source, "g");
+  const d = depth || 0;
   let out = "";
   let last = 0;
   let m;
-  INLINE_RE.lastIndex = 0;
-  while ((m = INLINE_RE.exec(text)) !== null) {
+  while ((m = re.exec(text)) !== null) {
     out += esc(text.slice(last, m.index));
     if (m[1] !== undefined) {
-      out += imgTagHtml(m[3], imgMap, m[2]);
+      out += imgTagHtml(unescapeMdUrl(m[3]), imgMap, m[2]);
     } else if (m[4] !== undefined) {
-      out += `<strong>${esc(m[5])}</strong>`;
+      // ⚠️ 必须递归：粗体里面还可能包着链接或图片。
+      // 实测维基「长城」开头那句 **[长城 (消歧义)](…)** 就是加粗包链接，
+      // 早先直接 esc(m[5]) 会把整条链接当纯文本吐出来，正文里露出原始语法。
+      out += `<strong>${d < 4 ? inlineToHtml(m[5], imgMap, d + 1) : esc(m[5])}</strong>`;
     } else {
-      out += `<a href="${esc(m[8])}" target="_blank" rel="noopener noreferrer">${esc(m[7] || m[8])}</a>`;
+      const href = unescapeMdUrl(m[8]);
+      out += `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(m[7] || href)}</a>`;
     }
-    last = INLINE_RE.lastIndex;
+    last = re.lastIndex;
   }
   out += esc(text.slice(last));
   return out;

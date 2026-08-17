@@ -285,6 +285,129 @@
     try { return new URL(u, location.href).href; } catch (e) { return u || ""; }
   }
 
+  // ⚠️ 交给 Readability 之前必须先做这一步，否则章节标题会全丢。
+  //
+  // 根因：Readability 组装正文时按「兄弟节点得分」筛选，而只装着一个标题、
+  // 没有段落的包装元素得分极低，会被**整个丢掉** —— 标题跟着一起没。
+  //
+  // 实测中文维基「长城」：页面 28 个标题（26 个被 <div class="mw-heading"> 包着），
+  // Readability 输出 0 个，正文变成 168 段平铺，层次全失。
+  // 拆掉包装后立刻恢复成 26 个，层级也对（H2 历史 / H3 春秋战国时期 / …）。
+  //
+  // 不写死 .mw-heading —— 按**结构**判断，别的 CMS 也有同样的包法。
+  function unwrapHeadingContainers(root) {
+    let total = 0;
+    // 嵌套的包装要多跑几轮：querySelectorAll 是文档序，外层先被检查、
+    // 那时它还没有直接的标题子节点，得等内层拆完下一轮才轮到它。
+    for (let pass = 0; pass < 3; pass++) {
+      let n = 0;
+      root.querySelectorAll("div, section, header, hgroup").forEach((el) => {
+        const heads = el.querySelectorAll(
+          ":scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6"
+        );
+        if (heads.length !== 1) return;
+        const h = heads[0];
+        // 容器里除了标题不能有别的实质内容（放行「编辑」这类小挂件）
+        if (el.querySelector("p, ul, ol, table, pre, blockquote, figure, img")) return;
+        if ((el.textContent || "").length - (h.textContent || "").length > 40) return;
+        el.replaceWith(h);
+        n++;
+      });
+      total += n;
+      if (!n) break;
+    }
+    return total;
+  }
+
+  // 很多文档站（MDN、GitBook 及各类技术文档）会把标题文字整个套进一个指向自身的
+  // 锚点链接里 —— 就是标题旁边那个 🔗 图标。抓出来会变成：
+  //     ## [你应该已经掌握哪些知识？](#你应该已经掌握哪些知识？)
+  // 标题里挂着一条指向自己的链接，既难看又没用。
+  //
+  // 只拆 href 以 # 开头的（站内锚点）；标题里指向别的页面的链接是有意义的，保留。
+  function stripHeadingAnchors(root) {
+    let n = 0;
+    root
+      .querySelectorAll("h1 a[href^='#'], h2 a[href^='#'], h3 a[href^='#'], h4 a[href^='#'], h5 a[href^='#'], h6 a[href^='#']")
+      .forEach((a) => {
+        if ((a.textContent || "").trim()) a.replaceWith(...a.childNodes); // 有文字：拆掉链接留文字
+        else a.remove();                                                   // 纯图标锚点：整个删掉
+        n++;
+      });
+    return n;
+  }
+
+  // ─────────────────────── 维基百科：信息框（infobox）───────────────────────
+  //
+  // 维基条目右上角那张表（官方名称/任期/前任继任…）信息密度很高，但它**不是正文**。
+  // Readability 会把它当正文的一部分交出来，夹在开头很碍事。
+  //
+  // 做法：先摘出来、从 DOM 里删掉（否则会重复），最后作为**附录接在文末**。
+  // 放文末而不是开头 —— 这工具的承诺是「干净正文」，信息框是附加价值，不该挡在前面。
+  // 实测蒋介石那页信息框 3478 字，放开头等于先读三千字表格才见正文。
+
+  function isWikipedia() {
+    try { return /(^|\.)wikipedia\.org$/i.test(location.hostname); } catch (e) { return false; }
+  }
+
+  // 从克隆的 DOM 里摘走信息框（会改动传入的 doc）
+  function takeWikiInfobox(doc) {
+    if (!isWikipedia()) return null;
+    const box = doc.querySelector("table.infobox, table.infobox_v3, .infobox");
+    if (!box) return null;
+    box.remove();
+
+    // ⚠️ 跳过默认折叠的嵌套表（class 含 mw-collapsed）。
+    // 它们装的是「其他中央职务」这类履历，内容是真的，但：
+    //   1. 页面上默认看不见，不属于「你读到的那一页」
+    //   2. 纯文本取出来是粘连的（"任期1928年10月10日—1931年12月15日前任谭延闿继任林森"），
+    //      要变得能读必须解析内部结构，成本远高于收益
+    // 蒋介石那页有 3 张这种表（86 行）。决定先跳过，日后再单独做。
+    box.querySelectorAll("table.mw-collapsible").forEach((t) => t.remove());
+    box.querySelectorAll("style, script, sup.reference, .mw-editsection").forEach((t) => t.remove());
+    return box;
+  }
+
+  // 取文本时给块级元素之间补分隔，否则会粘成一坨
+  function boxText(el) {
+    if (!el) return "";
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll("br, div, li, p, tr").forEach((n) => n.insertAdjacentText("beforebegin", "\n"));
+    return clone.textContent.replace(/[ \t ]+/g, " ")
+      .split("\n").map((s) => s.trim()).filter(Boolean).join(" · ").trim();
+  }
+
+  // 渲染成 Markdown。用「加粗键 + 列表」而不是表格 ——
+  // ⚠️ 导出 HTML 用的 mdToHtml 不支持 Markdown 表格，写成表格会显示成一堆竖线。
+  function renderWikiInfobox(box, onImage) {
+    const out = ["", "---", "", "## 信息框", ""];
+    const rows = box.querySelectorAll(":scope > tbody > tr");
+    let wrote = 0;
+
+    rows.forEach((tr) => {
+      const th = tr.querySelector(":scope > th");
+      const td = tr.querySelector(":scope > td");
+      const k = boxText(th);
+      const v = boxText(td);
+
+      // 图片行：交给外面统一走图片过滤和收集
+      const img = tr.querySelector("img");
+      if (img) {
+        const md = onImage(img);
+        if (md) { out.push(md, ""); wrote++; }
+        if (v && !k) { out.push("*" + v + "*", ""); }   // 图片说明
+        return;
+      }
+
+      if (k && !v) { out.push("", "### " + k, ""); wrote++; return; }   // 分节标题
+      if (k && v)  { out.push("- **" + k + "**：" + v); wrote++; return; } // 键值对
+      if (!k && v) { out.push("- " + v); wrote++; return; }              // 只有内容
+      // 两边都空 → 丢掉
+    });
+
+    return wrote ? out.join("\n") + "\n" : "";
+  }
+
   function extractGeneric() {
     if (typeof Readability !== "function") {
       return { ok: false, error: "Readability 没加载成功（vendor/Readability.js）" };
@@ -292,6 +415,10 @@
 
     // ⚠️ Readability 会改动传给它的 DOM，必须传克隆件，否则会把用户正在看的页面拆了
     const docClone = document.cloneNode(true);
+    unwrapHeadingContainers(docClone);
+    stripHeadingAnchors(docClone);
+    // ⚠️ 必须在跑 Readability 之前摘走，否则信息框会被当正文收进去、出现两次
+    const wikiBox = takeWikiInfobox(docClone);
     let art = null;
     try {
       art = new Readability(docClone, { charThreshold: 200 }).parse();
@@ -331,29 +458,55 @@
     // 而它们既没有 width/height 属性、尺寸只写在 URL 查询参数里，所以必须专门拦。
     const JUNK_URL = /avatar|profileicon|profile_image|\/icons?\/|logo|emoji|sprite|badge|favicon|spacer|pixel|blank\.gif|1x1/i;
 
+    // ⚠️ 尺寸判据：看**最长边**，不是「任一边」。
+    //
+    // 旧写法是「任一边小于 150 就毙」，会误杀横构图的正文照片：
+    // 维基缩略图的 HTML 属性写的是显示尺寸（常见 180×135），高度 135 < 150 →
+    // 一张长城实景照被当成图标扔掉。实测「长城」条目因此只抓到 10 张（应有 21 张）。
+    //
+    // 而且这在真实使用中必然发生：用户打开长文**直接点提取**、没往下滚，
+    // 首屏以外的图都还没懒加载（naturalWidth=0），判断就会落到 HTML 属性这一档。
+    //
+    // 新规则：内容图不管横竖，**总有一边是大的**；图标和头像则两边都小。
+    //   保留条件 = 最长边 ≥ 150，且（若两边都知道）最短边 ≥ 60
+    //   180×135 照片 → 留 ‖ 40×25 图标 → 扔 ‖ 64×64 头像 → 扔 ‖ 400×20 分隔条 → 扔
+    const MIN_SHORT_PX = 60;
+    function sizeLooksLikeContent(w, h) {
+      const long = Math.max(w || 0, h || 0);
+      if (!long) return null;                  // 一无所知，交给下一档判断
+      if (long < MIN_PX) return false;
+      if (w && h && Math.min(w, h) < MIN_SHORT_PX) return false;
+      return true;
+    }
+
     function isContentImage(node, url) {
       if (JUNK_URL.test(url)) return false;
 
       // 真实渲染尺寸（最可信）
       const live = liveSize.get(url);
-      if (live && (live.w || live.h)) {
-        return !((live.w && live.w < MIN_PX) || (live.h && live.h < MIN_PX));
+      if (live) {
+        const verdict = sizeLooksLikeContent(live.w, live.h);
+        if (verdict !== null) return verdict;
       }
 
       // 退而求其次：URL 查询参数里的尺寸（Reddit、微信等 CDN 常这么写）
       try {
         const q = new URL(url).searchParams;
-        const qw = Number(q.get("width") || q.get("w") || 0);
-        const qh = Number(q.get("height") || q.get("h") || 0);
-        if ((qw && qw < MIN_PX) || (qh && qh < MIN_PX)) return false;
+        const verdict = sizeLooksLikeContent(
+          Number(q.get("width") || q.get("w") || 0),
+          Number(q.get("height") || q.get("h") || 0)
+        );
+        if (verdict !== null) return verdict;
       } catch (e) {}
 
       // 最后看 HTML 属性
-      const aw = parseInt(node.getAttribute("width") || "0", 10);
-      const ah = parseInt(node.getAttribute("height") || "0", 10);
-      if ((aw && aw < MIN_PX) || (ah && ah < MIN_PX)) return false;
+      const verdict = sizeLooksLikeContent(
+        parseInt(node.getAttribute("width") || "0", 10),
+        parseInt(node.getAttribute("height") || "0", 10)
+      );
+      if (verdict !== null) return verdict;
 
-      return true;
+      return true;   // 什么尺寸信息都没有 → 放行，宁可多抓不可漏
     }
 
     const images = [];
@@ -398,6 +551,20 @@
     //    不加这个前置否定，每张图都会被砍掉后半截，只剩一个孤零零的 "!"。
     //    （这个坑我踩过：一次改动把 28 张图全删没了。）
     body = body.replace(/(?<!!)\[\s*\]\([^)]*\)/g, "");
+
+    // ── 维基信息框作为附录接在文末 ──
+    // 图片走和正文完全相同的过滤与收集逻辑，所以内嵌导出时会一并带上
+    if (wikiBox) {
+      const appendix = renderWikiInfobox(wikiBox, (node) => {
+        const raw = node.getAttribute("src") || "";
+        if (!raw || raw.startsWith("data:")) return "";
+        const u = absUrl(raw);
+        if (!isContentImage(node, u)) return "";
+        if (!images.includes(u)) images.push(u);
+        return "![](" + u + ")";
+      });
+      if (appendix) body = body.replace(/\s+$/, "") + "\n" + appendix;
+    }
 
     // ── 判断这页到底像不像「一篇文章」 ──
     //
