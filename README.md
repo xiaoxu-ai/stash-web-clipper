@@ -8,6 +8,8 @@
 
 输出 Markdown + 图片，或图片全内嵌的单文件 HTML。
 
+中文 · [English](README.en.md)
+
 </div>
 
 ---
