@@ -350,6 +350,32 @@
     try { return /(^|\.)wikipedia\.org$/i.test(location.hostname); } catch (e) { return false; }
   }
 
+  // ─────────────────────── 微信「长图」文章：正文图在分享轮播里 ───────────────────────
+  //
+  // 有一类微信文章（整篇就是一张长图 + 图下几行说明文字）不走常规的 #js_content 正文流，
+  // 图片单独放在一个「分享媒体轮播」组件里（`.share_media` / `#img_swiper_content` 之类的
+  // id/class，同一个模板的图片轮播、点开"分享"看到的也是它）—— 跟正文文字是**两棵不相交的
+  // DOM 子树**。Readability 按文字密度打分，纯图片的容器分数是 0，永远选不进正文，图片就这样
+  // 悄悄消失了：文字提取完全正常（用户不会觉得"提取失败"），只有图片没了。
+  //
+  // 和维基信息框是同一类问题（内容在 Readability 选中的正文节点之外），解法也一样：
+  // 单独摘出来，不依赖 Readability。
+  //
+  // ⚠️ 只在**主提取完全没抓到一张图**时才启用 —— 正常图文文章的图已经在 #js_content 里走完
+  // 整套 data-src / 尺寸过滤逻辑了，这里要是无条件也摸一遍，有把同一张图重复收进来、或者
+  // 误抓这个组件里其它内容（比如它在别的文章模板里到底装的是什么，没有逐一验证过）的风险。
+  function isWeChatArticle() {
+    try { return location.hostname === "mp.weixin.qq.com"; } catch (e) { return false; }
+  }
+  function takeWeChatSwiperImages(doc) {
+    if (!isWeChatArticle()) return [];
+    // ⚠️ 实测这个轮播里同一张图常出现两份：原图 + 微信另存的「转发用加水印版」——
+    // 两者尺寸一样，但 file id 不同（各是独立文件，不是同一张图的懒加载/清晰度变体），
+    // 水印版 URL 带 watermark=1。不排除的话，导出里这张图会重复出现一次。
+    return [...doc.querySelectorAll(".share_media img")]
+      .filter((img) => !/[?&]watermark=1(?:&|$)/.test(img.getAttribute("src") || ""));
+  }
+
   // 从克隆的 DOM 里摘走信息框（会改动传入的 doc）
   function takeWikiInfobox(doc) {
     if (!isWikipedia()) return null;
@@ -419,6 +445,10 @@
     stripHeadingAnchors(docClone);
     // ⚠️ 必须在跑 Readability 之前摘走，否则信息框会被当正文收进去、出现两次
     const wikiBox = takeWikiInfobox(docClone);
+    // 微信长图的分享轮播不会被 Readability 选中，不影响正文评分，摘不摘都行——
+    // 但在 Readability.parse() 之前先摘引用快照，不依赖 parse() 之后 docClone 的状态
+    // （它会怎么改动没选中的节点，没把握，不如摘早了稳）。
+    const wechatSwiperImgs = takeWeChatSwiperImages(docClone);
     let art = null;
     try {
       art = new Readability(docClone, { charThreshold: 200 }).parse();
@@ -499,14 +529,35 @@
         if (verdict !== null) return verdict;
       } catch (e) {}
 
-      // 最后看 HTML 属性
+      // 最后看 HTML 属性（微信懒加载图不写 width/height，写的是 data-w/data-h）
       const verdict = sizeLooksLikeContent(
-        parseInt(node.getAttribute("width") || "0", 10),
-        parseInt(node.getAttribute("height") || "0", 10)
+        parseInt(node.getAttribute("width") || node.getAttribute("data-w") || "0", 10),
+        parseInt(node.getAttribute("height") || node.getAttribute("data-h") || "0", 10)
       );
       if (verdict !== null) return verdict;
 
       return true;   // 什么尺寸信息都没有 → 放行，宁可多抓不可漏
+    }
+
+    // ─────────────────────── 懒加载图片：取真实地址 ───────────────────────
+    //
+    // 微信公众号文章的正文图 src 要么整个不写，要么在滚动触发懒加载后被自己的
+    // 脚本换成 1×1 占位符；真实地址一直都在 data-src 里（实测：抓包 3 篇公众号
+    // 文章原始 HTML，27 张正文图 26 张没有 src 属性，全部只有 data-src）。
+    // data-original / data-lazy-src / data-actualsrc 是同一套模式在其它站点的常见变体。
+    //
+    // ⚠️ 不能无脑优先 data-src —— 有些站点反过来，data-src 是低清占位、src 才是原图。
+    // 所以只在 src 缺失或明显是占位符（空 / data: 内联）时才回落，src 有效就直接用。
+    // 实测 Wikipedia / MDN 页面的 <img> 完全不带 data-src，这条回落对它们不生效。
+    const LAZY_SRC_ATTRS = ["data-src", "data-original", "data-lazy-src", "data-actualsrc"];
+    function pickImgSrc(node) {
+      const src = node.getAttribute("src") || "";
+      if (src && !src.startsWith("data:")) return src;
+      for (const attr of LAZY_SRC_ATTRS) {
+        const v = node.getAttribute(attr);
+        if (v) return v;
+      }
+      return src;
     }
 
     // ── 表格 ──
@@ -570,7 +621,7 @@
     tdCell.addRule("cellImages", {
       filter: "img",
       replacement: function (content, node) {
-        const raw = node.getAttribute("src") || "";
+        const raw = pickImgSrc(node);
         if (!raw || raw.startsWith("data:")) return "";
         const u = absUrl(raw);
         if (!isContentImage(node, u)) return "";
@@ -581,7 +632,7 @@
     td.addRule("collectImages", {
       filter: "img",
       replacement: function (content, node) {
-        const raw = node.getAttribute("src") || "";
+        const raw = pickImgSrc(node);
         if (!raw || raw.startsWith("data:")) return "";   // 内联小图/追踪像素
         const u = absUrl(raw);
         if (!isContentImage(node, u)) return "";
@@ -650,7 +701,7 @@
     // 图片走和正文完全相同的过滤与收集逻辑，所以内嵌导出时会一并带上
     if (wikiBox) {
       const appendix = renderWikiInfobox(wikiBox, (node) => {
-        const raw = node.getAttribute("src") || "";
+        const raw = pickImgSrc(node);
         if (!raw || raw.startsWith("data:")) return "";
         const u = absUrl(raw);
         if (!isContentImage(node, u)) return "";
@@ -658,6 +709,22 @@
         return "![](" + u + ")";
       });
       if (appendix) body = body.replace(/\s+$/, "") + "\n" + appendix;
+    }
+
+    // ── 微信长图兜底：主提取一张图都没抓到，才去分享轮播里摸 ──
+    // 图放在正文最前面（跟着来源行），不是文末附录——它就是这篇的正文，不是附加信息。
+    if (images.length === 0 && wechatSwiperImgs.length) {
+      const swiperMd = [];
+      wechatSwiperImgs.forEach((node) => {
+        const raw = pickImgSrc(node);
+        if (!raw || raw.startsWith("data:")) return;
+        const u = absUrl(raw);
+        if (!isContentImage(node, u)) return;
+        if (images.includes(u)) return;
+        images.push(u);
+        swiperMd.push(`![](${u})`);
+      });
+      if (swiperMd.length) body = swiperMd.join("\n\n") + "\n\n" + body;
     }
 
     // ── 判断这页到底像不像「一篇文章」 ──
